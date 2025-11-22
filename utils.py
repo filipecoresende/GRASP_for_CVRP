@@ -10,7 +10,7 @@ class CVRPInstance:
         self.coords: Coordinates = coords
         self.demands: List[int] = demands
         self.capacity: int = capacity
-        self.depot: int = 0  # Assuming the first node is the depot
+        self.depot: int = 0  # first node is the depot
         self.nodes: List[int] = list(range(self.nnodes))
         self.distance_matrix: List[List[float]] = self._compute_distance_matrix()
 
