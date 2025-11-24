@@ -4,7 +4,7 @@ from math import sqrt, ceil
 from time import perf_counter
 from copy import deepcopy
 
-def local_search(sol: List[List[int]], I: CVRPInstance, start_time: float, time_limit: float):
+def local_search(sol: List[List[int]], I: CVRPInstance, start_time: float, time_limit: float, periodic_break: int, tau_reduction: int):
 
     def evaluate_removal(prev, rem, next):
         return (
@@ -165,7 +165,9 @@ def local_search(sol: List[List[int]], I: CVRPInstance, start_time: float, time_
         #     print(f"{best_delta} {best_i} and {best_j}")
         return best_delta, best_i, best_j
 
-    TL = [-1 for i in range(ceil(sqrt(I.nnodes)) * 2)]
+    tau = ceil(sqrt(I.nnodes)) * 2
+
+    TL = [-1 for i in range(tau)]
 
     capacity_usage = [0 for i in range(len(sol))]
     for i, route in enumerate(sol):
@@ -189,6 +191,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance, start_time: float, time_
     print(f"Initial cost: {current_cost}")
 
     patience = 0
+    force_break = False
 
     while not stop:
         sel_r1 = -1
@@ -200,52 +203,53 @@ def local_search(sol: List[List[int]], I: CVRPInstance, start_time: float, time_
 
         aspiration_cost = best_cost - current_cost
 
-        # Evaluate reinsertions
-        for r1 in range(len(sol)):
-            for r2 in range(len(sol)):
-                if  r1 != r2:
-                    delta, pos, dest =  reinsertion(r1, r2, sol, TL, capacity_usage, aspiration_cost)
+        if not force_break:
+            # Evaluate reinsertions
+            for r1 in range(len(sol)):
+                for r2 in range(len(sol)):
+                    if  r1 != r2:
+                        delta, pos, dest =  reinsertion(r1, r2, sol, TL, capacity_usage, aspiration_cost)
+                        if delta < sel_delta:
+                            sel_r1 = r1
+                            sel_r2 = r2
+                            sel_delta = delta
+                            sel_i = pos
+                            sel_j = dest
+                            sel_type = 'reinsert'
+
+            # # Evaluate 2-opt
+            for r in range(len(sol)):
+                delta, i, j = two_opt(r, sol, TL, aspiration_cost)
+                if delta < sel_delta:
+                    sel_r1 = r
+                    sel_r2 = -1
+                    sel_delta = delta
+                    sel_i = i
+                    sel_j = j
+                    sel_type = '2-opt'
+
+            # # Evaluate intra-swap
+            for r in range(len(sol)):
+                delta, i, j = intra_swap(r, sol, TL, aspiration_cost)
+                if delta < sel_delta:
+                    sel_r1 = r
+                    sel_r2 = -1
+                    sel_delta = delta
+                    sel_i = i
+                    sel_j = j
+                    sel_type = 'intra-swap'
+
+            # # Evaluate inter-swap
+            for i in range(len(sol)):
+                for j in range(i+1, len(sol)):
+                    delta, pos, dest =  inter_swap(i, j, sol, TL, capacity_usage, aspiration_cost)
                     if delta < sel_delta:
-                        sel_r1 = r1
-                        sel_r2 = r2
+                        sel_r1 = i
+                        sel_r2 = j
                         sel_delta = delta
                         sel_i = pos
                         sel_j = dest
-                        sel_type = 'reinsert'
-
-        # # Evaluate 2-opt
-        for r in range(len(sol)):
-            delta, i, j = two_opt(r, sol, TL, aspiration_cost)
-            if delta < sel_delta:
-                sel_r1 = r
-                sel_r2 = -1
-                sel_delta = delta
-                sel_i = i
-                sel_j = j
-                sel_type = '2-opt'
-
-        # # Evaluate intra-swap
-        for r in range(len(sol)):
-            delta, i, j = intra_swap(r, sol, TL, aspiration_cost)
-            if delta < sel_delta:
-                sel_r1 = r
-                sel_r2 = -1
-                sel_delta = delta
-                sel_i = i
-                sel_j = j
-                sel_type = 'intra-swap'
-
-        # # Evaluate inter-swap
-        for i in range(len(sol)):
-            for j in range(i+1, len(sol)):
-                delta, pos, dest =  inter_swap(i, j, sol, TL, capacity_usage, aspiration_cost)
-                if delta < sel_delta:
-                    sel_r1 = i
-                    sel_r2 = j
-                    sel_delta = delta
-                    sel_i = pos
-                    sel_j = dest
-                    sel_type = 'inter-swap'
+                        sel_type = 'inter-swap'
 
         # # Evaluate break-route
         for r in range(len(sol)):
@@ -327,7 +331,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance, start_time: float, time_
             
         else:
             print("No valid moviments found. Resetting Tabu List")
-            TL = [-1 for i in range(ceil(sqrt(I.nnodes)) * 2)]
+            TL = [-1 for i in range(tau)]
             sel_delta = 0
 
         current_cost += sel_delta
@@ -335,6 +339,19 @@ def local_search(sol: List[List[int]], I: CVRPInstance, start_time: float, time_
             best_sol = deepcopy(sol)
             best_cost = current_cost
             best_time = perf_counter() - start_time
+            patience = 0
+
+            if tau_reduction and len(TL) == tau:
+                TL = TL[tau//2:]
+
+        if force_break:
+            force_break = False
+
+        if patience > tau and len(TL) < tau:
+            TL = [-1 for i in range(tau - len(TL))] + TL
+
+        if periodic_break and patience > 1000:
+            force_break = True
             patience = 0
 
         # print(TL)

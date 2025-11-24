@@ -16,6 +16,8 @@ instances = [ "instance1.vrp" ,"instance2.vrp", "instance3.vrp",
 inst = int(argv[1])
 filename = instances_path + instances[inst]
 construction = argv[2]
+periodic_break = int(argv[3])
+tau_reduction =  int(argv[4])
 time_limit = 60 * 30
 start_time = time.perf_counter()
 
@@ -28,7 +30,7 @@ elif construction == "1":
 else:
     constructed_solution = sweep_constructive_heuristic(cvrp_instance)
 
-improved_solution, cost, time_best, total_time = local_search(constructed_solution, cvrp_instance, start_time, time_limit)
+improved_solution, cost, time_best, total_time = local_search(constructed_solution, cvrp_instance, start_time, time_limit, periodic_break, tau_reduction)
 
 print(filename)
 print(construction)
@@ -38,6 +40,6 @@ print(constructed_solution)
 print("Improved solution")
 print(improved_solution)
 
-with open(f"results/instance_{inst+1}_{construction}.out", 'w') as file:
+with open(f"results/instance_{inst+1}_{construction}_{periodic_break}_{tau_reduction}.out", 'w') as file:
         # The .write() method writes the string to the file
         file.write(f"{inst+1};{construction};{total_time};{cost};{time_best}\n")
