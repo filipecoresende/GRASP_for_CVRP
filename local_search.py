@@ -1,8 +1,10 @@
 from typing import List, Dict
 from utils import CVRPInstance
 from math import sqrt, ceil
+from time import perf_counter
+from copy import deepcopy
 
-def local_search(sol: List[List[int]], I: CVRPInstance):
+def local_search(sol: List[List[int]], I: CVRPInstance, start_time: float, time_limit: float):
 
     def evaluate_removal(prev, rem, next):
         return (
@@ -26,7 +28,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
             + I.distance_matrix[i][next]
         )
 
-    def reinsertion(r_1, r_2, sol, TL, capacity_usage):
+    def reinsertion(r_1, r_2, sol, TL, capacity_usage, aspiration_cost):
         route_1 = sol[r_1]
         route_2 = sol[r_2]
         l_r1 = len(route_1)
@@ -36,11 +38,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
         best_pos = -1
         best_destination = -1
         for r_pos in range(1, len(route_1)):
-            if route_1[r_pos] in TL:
-                continue
             for i_pos in range(1, len(route_2)):
-                if route_2[i_pos] in TL:
-                    continue
                 prev_r1 = route_1[r_pos-1]
                 next_r1 = route_1[(r_pos+1)%l_r1]
                 prev_r2 = route_2[i_pos-1]
@@ -50,7 +48,8 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
                     + evaluate_insertion(prev_r2, route_1[r_pos], next_r2)
                 )
 
-                if I.demands[route_1[r_pos]] <= I.capacity - capacity_usage[r_2] and delta_cost < best_delta:
+                if ((route_1[r_pos] not in TL and route_2[i_pos] not in TL or delta_cost < aspiration_cost)
+                    and I.demands[route_1[r_pos]] <= I.capacity - capacity_usage[r_2] and delta_cost < best_delta):
                     best_delta = delta_cost
                     best_pos = r_pos
                     best_destination = i_pos
@@ -59,23 +58,21 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
         #     print(f"{best_delta} by {best_pos} to {best_destination}")
         return best_delta, best_pos, best_destination
 
-    def two_opt(r, sol, TL):
+    def two_opt(r, sol, TL, aspiration_cost):
         route = sol[r]
 
         best_delta = float('inf')
         best_i = -1
         best_j = -1
         for i in range(1, len(route)-1):
-            if route[i] in TL:
-                continue
             for j in range(i+1, len(route)):
-                if route[j] in TL or (i==1 and j==len(route)-1):
+                if (i==1 and j==len(route)-1):
                     continue
                 prev = i-1
                 next = (j+1)%len(route)
                 delta_cost = evaluate_2_opt(route[i], route[j], route[prev], route[next])
 
-                if delta_cost < best_delta:
+                if (route[i] not in TL and route[j] not in TL or delta_cost < aspiration_cost) and delta_cost < best_delta:
                     best_delta = delta_cost
                     best_i = i
                     best_j = j
@@ -84,18 +81,14 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
         #     print(f"{best_delta} {best_i} and {best_j}")
         return best_delta, best_i, best_j
 
-    def intra_swap(r, sol, TL):
+    def intra_swap(r, sol, TL, aspiration_cost):
         route = sol[r]
 
         best_delta = float('inf')
         best_i = -1
         best_j = -1
         for i in range(1, len(route)-1):
-            if route[i] in TL:
-                continue
             for j in range(i+2, len(route)):
-                if route[j] in TL:
-                    continue
                 prev_i = route[i-1]
                 next_i = route[(i+1)%len(route)]
                 prev_j = route[j-1]
@@ -107,7 +100,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
                     + evaluate_insertion(prev_i, route[j], next_i)
                 )
 
-                if delta_cost < best_delta:
+                if (route[i] not in TL and route[j] not in TL or delta_cost < aspiration_cost) and delta_cost < best_delta:
                     best_delta = delta_cost
                     best_i = i
                     best_j = j
@@ -116,7 +109,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
         #     print(f"{r}:{best_delta} {best_i} and {best_j}")
         return best_delta, best_i, best_j
 
-    def inter_swap(r_1, r_2, sol, TL, capacity_usage):
+    def inter_swap(r_1, r_2, sol, TL, capacity_usage, aspiration_cost):
         route_1 = sol[r_1]
         route_2 = sol[r_2]
         l_r1 = len(route_1)
@@ -126,11 +119,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
         best_pos = -1
         best_destination = -1
         for i in range(1, len(route_1)):
-            if route_1[i] in TL:
-                continue
             for j in range(1, len(route_2)):
-                if route_2[j] in TL:
-                    continue
                 prev_r1 = route_1[i-1]
                 next_r1 = route_1[(i+1)%l_r1]
                 prev_r2 = route_2[j-1]
@@ -143,7 +132,8 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
                 )
 
                 if (
-                    I.demands[route_1[i]] <= I.capacity - capacity_usage[r_2] + I.demands[route_2[j]]
+                    (route_1[i] not in TL and route_2[j] not in TL or delta_cost < aspiration_cost)
+                    and I.demands[route_1[i]] <= I.capacity - capacity_usage[r_2] + I.demands[route_2[j]]
                     and I.demands[route_2[j]] <= I.capacity - capacity_usage[r_1] + I.demands[route_1[i]]
                     and delta_cost < best_delta
                 ):
@@ -155,7 +145,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
         #     print(f"{best_delta} by {best_pos} to {best_destination}")
         return best_delta, best_pos, best_destination
 
-    def break_route(r, sol, TL):
+    def break_route(r, sol, TL, aspiration_cost):
         route = sol[r]
 
         best_delta = float('inf')
@@ -185,6 +175,21 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
     stop = False
     iter = 0
 
+    current_cost = 0
+    
+    for i, route in enumerate(sol):
+        for v in range(len(route)):
+            current_cost += I.distance_matrix[route[v]][route[(v+1)%len(route)]]
+
+    sol = deepcopy(sol)
+    best_sol = deepcopy(sol)
+    best_cost = current_cost
+    best_time = 0
+
+    print(f"Initial cost: {current_cost}")
+
+    patience = 0
+
     while not stop:
         sel_r1 = -1
         sel_r2 = -1
@@ -193,11 +198,13 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
         sel_j = -1
         sel_type = None
 
+        aspiration_cost = best_cost - current_cost
+
         # Evaluate reinsertions
         for r1 in range(len(sol)):
             for r2 in range(len(sol)):
                 if  r1 != r2:
-                    delta, pos, dest =  reinsertion(r1, r2, sol, TL, capacity_usage)
+                    delta, pos, dest =  reinsertion(r1, r2, sol, TL, capacity_usage, aspiration_cost)
                     if delta < sel_delta:
                         sel_r1 = r1
                         sel_r2 = r2
@@ -208,7 +215,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
 
         # # Evaluate 2-opt
         for r in range(len(sol)):
-            delta, i, j = two_opt(r, sol, TL)
+            delta, i, j = two_opt(r, sol, TL, aspiration_cost)
             if delta < sel_delta:
                 sel_r1 = r
                 sel_r2 = -1
@@ -219,7 +226,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
 
         # # Evaluate intra-swap
         for r in range(len(sol)):
-            delta, i, j = intra_swap(r, sol, TL)
+            delta, i, j = intra_swap(r, sol, TL, aspiration_cost)
             if delta < sel_delta:
                 sel_r1 = r
                 sel_r2 = -1
@@ -231,7 +238,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
         # # Evaluate inter-swap
         for i in range(len(sol)):
             for j in range(i+1, len(sol)):
-                delta, pos, dest =  inter_swap(i, j, sol, TL, capacity_usage)
+                delta, pos, dest =  inter_swap(i, j, sol, TL, capacity_usage, aspiration_cost)
                 if delta < sel_delta:
                     sel_r1 = i
                     sel_r2 = j
@@ -242,7 +249,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
 
         # # Evaluate break-route
         for r in range(len(sol)):
-            delta, i, j = break_route(r, sol, TL)
+            delta, i, j = break_route(r, sol, TL, aspiration_cost)
             if delta < sel_delta:
                 sel_r1 = r
                 sel_r2 = -1
@@ -250,11 +257,6 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
                 sel_i = i
                 sel_j = j
                 sel_type = 'break-route'
-
-        # Temp
-        if sel_delta >= 0:
-            print("Local optimum")
-            break
 
         if sel_type == 'reinsert':
             v1 = sol[sel_r1][sel_i]
@@ -265,11 +267,11 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
             sol[sel_r2].insert(sel_j, v1)
             capacity_usage[sel_r2] += I.demands[v1]
 
-            if len(sol[sel_r1] == 1):
+            if len(sol[sel_r1]) == 1:
                 del sol[sel_r1]
                 del capacity_usage[sel_r1]
 
-            print(f"{sel_r1}: {v1} {sel_i}, {sel_r2}: {v1} {sel_j}, delta: {sel_delta}")
+            # print(f"{sel_r1}: {v1} {sel_i}, {sel_r2}: {v1} {sel_j}, delta: {sel_delta}")
 
             TL = TL[2:] + [v1, -1]
 
@@ -279,7 +281,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
 
             sol[sel_r1] = sol[sel_r1][:sel_i] + sol[sel_r1][sel_i:sel_j+1][::-1] + sol[sel_r1][sel_j+1:]
 
-            print(f"{sel_r1}: {sel_i} {sel_j}, delta: {sel_delta}")
+            # print(f"{sel_r1}: {sel_i} {sel_j}, delta: {sel_delta}")
 
             TL = TL[2:] + [v1, v2]
 
@@ -290,7 +292,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
             sol[sel_r1][sel_i] = v2
             sol[sel_r1][sel_j] = v1
 
-            print(f"{sel_r1}: {sel_i} {sel_j}, delta: {sel_delta}")
+            # print(f"{sel_r1}: {sel_i} {sel_j}, delta: {sel_delta}")
 
             TL = TL[2:] + [v1, v2]
 
@@ -304,7 +306,7 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
             capacity_usage[sel_r1] += I.demands[v2] - I.demands[v1] 
             capacity_usage[sel_r2] += I.demands[v1] - I.demands[v2]
 
-            print(f"{sel_r1}: {sel_i}, {sel_r2}:{sel_j}, delta: {sel_delta}")
+            # print(f"{sel_r1}: {sel_i}, {sel_r2}:{sel_j}, delta: {sel_delta}")
 
             TL = TL[2:] + [v1, v2]
 
@@ -319,20 +321,31 @@ def local_search(sol: List[List[int]], I: CVRPInstance):
             capacity_usage.append(new_capacity)
             capacity_usage[sel_r1] -= new_capacity
 
-            print(f"{sel_r1}: {sel_i}, delta: {sel_delta}")
+            # print(f"{sel_r1}: {sel_i}, delta: {sel_delta}")
 
             TL = TL[2:] + [sol[-1][1], sol[-1][-1]]
             
         else:
-            print("No valid moviments found")
-            break
+            print("No valid moviments found. Resetting Tabu List")
+            TL = [-1 for i in range(ceil(sqrt(I.nnodes)) * 2)]
+            sel_delta = 0
 
-        print(TL)
+        current_cost += sel_delta
+        if current_cost < best_cost:
+            best_sol = deepcopy(sol)
+            best_cost = current_cost
+            best_time = perf_counter() - start_time
+            patience = 0
+
+        # print(TL)
 
         iter += 1
-        stop = True if iter > 100 else stop
+        patience += 1
+        stop = True if perf_counter() - start_time >= time_limit else stop
 
     # print(capacity_usage)
     # print(I.capacity)
 
-    return sol
+    print(f"Final cost: {best_cost}")
+
+    return best_sol, best_cost, best_time, perf_counter() - start_time
